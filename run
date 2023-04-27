@@ -52,11 +52,16 @@ function	jail::configure_bash()
 	local	c_r=$(printf '%b' '\x1b[31m')
 	local	c_y=$(printf '%b' '\x1b[33m')
 	local	c_g=$(printf '%b' '\x1b[32m')
-	local	c_b=$(printf '%b' '\x1b[5m')
+	local	c_u=$(printf '%b' '\x1b[4m')
 	local	rst=$(printf '%b' '\x1b[0m')
 
-	echo "PS1=\"${c_r}${USER}${rst}${c_y}@${rst}${c_g}${c_b}\\h${rst} $ \"" > \
-		"${JAIL_PATH}/etc/bash.bashrc"
+	prompt="${c_r}${USER}"
+	prompt+="🔒"
+	prompt+="${c_y}\\h${rst}"
+	prompt+=" [ ${c_g}${c_u}\\w${rst} ] $ "
+
+	echo "PS1=\"${prompt}\"" > "${JAIL_PATH}/etc/bash.bashrc"
+	cp -r /lib/terminfo "${JAIL_PATH}/etc/"
 }
 
 function	jail::prepare()
@@ -89,8 +94,10 @@ function	jail::entry()
 				--unshare-all \
 				--chdir "${BASE_HOME}" \
 				--clearenv \
+				--setenv PROMPT_DIRTRIM "2" \
 				--setenv LS_COLORS "${LS_COLORS}" \
-				--hostname jail \
+				--setenv TERM "${TERM}" \
+				--hostname jailed \
 				"/bin/bash")
 	jail::clean
 }
@@ -112,7 +119,7 @@ ALLOWED_CMD=(
 	"less"
 	"ls"
 	"rm"
-	"id"		# FROM HERE DEBUG COMMAND, NOT NEEDED ONES, JUST TO DEBUG
+	"clear"
 )
 
 jail::entry
