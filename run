@@ -1,0 +1,121 @@
+#!/bin/bash
+
+##BEGIN#________________________>#_|FUNCTION|_#<______________________________##
+
+function	utils::mkdir()
+{
+	local	dir_path="${1:-}"
+
+	[ -f "${dir_path}" ] && rm -f "${dir_path}"
+	[ -d "${dir_path}" ] && rm -rf "${dir_path}"
+	[ ! -d "${dir_path}" ] && mkdir -p "${dir_path}"
+}
+
+function	jail::copy_library()
+{
+	declare	-a	library
+	local		base_dir
+
+	library=($(\
+	for command_path in $(find "${JAIL_PATH}/bin" -type f -executable -print); do
+		ldd "${command_path}" | perl -ne "print if s|^.*?(/lib.*?) .*$|\1|g"
+	done | sort -u))
+
+	for element in ${library[@]}; do
+		base_dir="${JAIL_PATH}${element%\/*}"
+		mkdir -p "${base_dir}"
+		cp "${element}" "${base_dir}"
+	done
+}
+
+function	jail::copy_command()
+{
+	local	command_path
+
+	for command in "${ALLOWED_CMD[@]}"; do
+		command_path=$(type -P "${command}")
+		[ "${command_path}" ] && cp "${command_path}" "${JAIL_PATH}/bin"
+	done
+}
+
+function	jail::mkdir()
+{
+	utils::mkdir "${JAIL_PATH}/bin"
+	utils::mkdir "${JAIL_PATH}/etc"
+	utils::mkdir "${JAIL_PATH}/lib"
+	utils::mkdir "${JAIL_PATH}/lib64"
+	utils::mkdir "${JAIL_PATH}/home"
+}
+
+function	jail::configure_bash()
+{
+	local	c_r=$(printf '%b' '\x1b[31m')
+	local	c_y=$(printf '%b' '\x1b[33m')
+	local	c_g=$(printf '%b' '\x1b[32m')
+	local	c_b=$(printf '%b' '\x1b[5m')
+	local	rst=$(printf '%b' '\x1b[0m')
+
+	echo "PS1=\"${c_r}${USER}${rst}${c_y}@${rst}${c_g}${c_b}\\h${rst} $ \"" > \
+		"${JAIL_PATH}/etc/bash.bashrc"
+}
+
+function	jail::prepare()
+{
+	jail::mkdir
+	jail::copy_command
+	jail::copy_library
+	jail::configure_bash
+}
+
+function	jail::clean()
+{
+	[ -d "${JAIL_PATH}" ] && rm -rf "${JAIL_PATH}"
+	trap - SIGINT SIGQUIT SIGTSTP
+	exit 1
+}
+
+function	jail::entry()
+{
+	jail::prepare
+	(exec \
+		unshare \
+			--map-user=$(id -ru) \
+			--map-group=$(id -rg) \
+			--pid \
+			--kill-child=SIGQUIT \
+			bwrap \
+				--bind "${JAIL_PATH}" / \
+				--dev-bind "${BASE_HOME}" "/home/${USER}" \
+				--unshare-all \
+				--chdir "${BASE_HOME}" \
+				--clearenv \
+				--setenv LS_COLORS "${LS_COLORS}" \
+				--hostname jail \
+				"/bin/bash")
+	jail::clean
+}
+
+##END#__________________________<#_|FUNCTION|_#>______________________________##
+
+##BEGIN#__________________________>#_|MAIN|_#<________________________________##
+
+trap "jail::clean" SIGINT SIGQUIT SIGTSTP
+
+BASE_HOME=/home
+BASE_HOME="${BASE_HOME}/${USER}"
+JAIL_PATH="${BASE_HOME}/.jail"
+
+ALLOWED_CMD=(
+	"bash"
+	"cat"
+	"du"
+	"less"
+	"ls"
+	"rm"
+	"id"		# FROM HERE DEBUG COMMAND, NOT NEEDED ONES, JUST TO DEBUG
+)
+
+jail::entry
+
+##END#____________________________<#_|MAIN|_#>________________________________##
+
