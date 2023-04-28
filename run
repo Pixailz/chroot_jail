@@ -1,45 +1,163 @@
 #!/bin/bash
 
+# i think this is better that this happen here, as this is the first thing the
+# scripts will do
+
+# list of blocked SIGNAL
+BLOCKED_SIG=(
+	"SIGINT"
+	"SIGQUIT"
+	"SIGTSTP"
+)
+
+# trap BLOCKED_SIG to jail::clean
+trap "jail::clean" ${BLOCKED_SIG[@]}
+
+# building user home folder
+## Base home folder
+BASE_HOME=/home
+## user home folder
+BASE_HOME="${BASE_HOME}/${USER}"
+JAILS_PATH="${BASE_HOME}/.jails"
+
+# for multiple jailS
+for jail_id in {00..10}; do
+	if [ ! -d "${JAILS_PATH}/jail_${jail_id}" ]; then
+		JAIL_PATH="${JAILS_PATH}/jail_${jail_id}"
+		break
+	fi
+done
+
+# allowed command to the chroot jail
+ALLOWED_CMD=(
+	'bash'
+	'cat'
+	'du'
+	'less'
+	'ls'
+	'rm'
+	'clear'
+)
+
+# used command, using the path so no alias or nasty stuff will interfer
+declare -A CMD=(
+	['printf']=0
+	['rm']=0
+	['mkdir']=0
+	['cp']=0
+	['find']=0
+	['ldd']=0
+	['perl']=0
+	['sort']=0
+	['unshare']=0
+	['bwrap']=0
+	['env']=0
+	['[']=0
+)
+
+for key in ${!CMD[@]}; do
+	CMD[${key}]="$(type -P ${key})"
+done
+
 ##BEGIN#________________________>#_|FUNCTION|_#<______________________________##
 
 function	utils::mkdir()
 {
+	: "
+	INFO
+		LIB				utils
+		FUNCTION		mkdir
+		DESC			make a dir. if path is a file is deleted, then check if
+						path is a dir, in this way i ensure that the dir_path is
+						created
+		ARG				[1] dir_path=${1:-}
+	"
 	local	dir_path="${1:-}"
 
-	[ -f "${dir_path}" ] && rm -f "${dir_path}"
-	[ -d "${dir_path}" ] && rm -rf "${dir_path}"
-	[ ! -d "${dir_path}" ] && mkdir -p "${dir_path}"
+	"${CMD['[']}" -f "${dir_path}" ] && "${CMD['rm']}" -f "${dir_path}"
+	"${CMD['[']}" -d "${dir_path}" ] && "${CMD['rm']}" -rf "${dir_path}"
+	"${CMD['[']}" ! -d "${dir_path}" ] && "${CMD['mkdir']}" -p "${dir_path}"
 }
 
-function	jail::copy_library()
+
+function	jail::configure_prompt()
 {
-	declare	-a	library
-	local		base_dir
+	: "
+	INFO
+		LIB				jail
+		FUNCTION		configure_prompt
+		DESC			configure a cool prompt for the jailed prisoner :)
+		ARG				[?] JAIL_PATH=${JAIL_PATH}
+	"
+	local	c_r=$("${CMD['printf']}" '%b' '\x1b[31m')
+	local	c_y=$("${CMD['printf']}" '%b' '\x1b[33m')
+	local	c_g=$("${CMD['printf']}" '%b' '\x1b[32m')
+	local	c_u=$("${CMD['printf']}" '%b' '\x1b[4m')
+	local	rst=$("${CMD['printf']}" '%b' '\x1b[0m')
 
-	library=($(\
-	for command_path in $(find "${JAIL_PATH}/bin" -type f -executable -print); do
-		ldd "${command_path}" | perl -ne "print if s|^.*?(/lib.*?) .*$|\1|g"
-	done | sort -u))
+	prompt="${c_r}${USER}"
+	prompt+="🔒"
+	prompt+="${c_y}\\h${rst}"
+	prompt+=" [ ${c_g}${c_u}\\w${rst} ] $ "
 
-	for element in ${library[@]}; do
-		base_dir="${JAIL_PATH}${element%\/*}"
-		mkdir -p "${base_dir}"
-		cp "${element}" "${base_dir}"
-	done
+	"${CMD['printf']}" "PS1=\"${prompt}\"\n" > "${JAIL_PATH}/etc/bash.bashrc"
+}
+
+function	jail::hardening::unset_bash_function()
+{
+	unset -f env
+}
+
+function	jail::hardening()
+{
+	jail::hardening::unset_bash_function
 }
 
 function	jail::copy_command()
 {
-	local	command_path
+	: "
+	INFO
+		LIB				jail
+		FUNCTION		copy_command
+		DESC			copy given ALLOWED_CMD to ${HOME}/.jail with their
+						assosiated library
+		ARG				[?] ALLOWED_CMD=${ALLOWED_CMD[@]}
+						[?] JAIL_PATH=${JAIL_PATH}
+	"
+	local		command_path
+	local		base_dir
+	declare	-a	library
 
 	for command in "${ALLOWED_CMD[@]}"; do
 		command_path=$(type -P "${command}")
-		[ "${command_path}" ] && cp "${command_path}" "${JAIL_PATH}/bin"
+		"${CMD['[']}" "${command_path}" ] && "${CMD['cp']}" "${command_path}" "${JAIL_PATH}/bin"
 	done
+
+	library=($(\
+	for command_path in $("${CMD['find']}" "${JAIL_PATH}/bin" -type f -executable -print); do
+		"${CMD['ldd']}" "${command_path}" | "${CMD['perl']}" -ne "print if s|^.*?(/lib.*?) .*$|\1|g"
+	done | "${CMD['sort']}" -u))
+
+	for element in ${library[@]}; do
+		base_dir="${JAIL_PATH}${element%\/*}"
+		"${CMD['mkdir']}" -p "${base_dir}"
+		"${CMD['cp']}" "${element}" "${base_dir}"
+	done
+
+	# copy database of term to allow ctrl+l to clear the screen
+	"${CMD['cp']}" -r /lib/terminfo "${JAIL_PATH}/etc/"
 }
 
 function	jail::mkdir()
 {
+	: "
+	INFO
+		LIB				jail
+		FUNCTION		mkdir
+		DESC			make all necessary dir for the jail
+		ARG				[?] JAIL_PATH=${JAIL_PATH}
+	"
+	utils::mkdir "${JAIL_PATH}"
 	utils::mkdir "${JAIL_PATH}/bin"
 	utils::mkdir "${JAIL_PATH}/etc"
 	utils::mkdir "${JAIL_PATH}/lib"
@@ -47,48 +165,59 @@ function	jail::mkdir()
 	utils::mkdir "${JAIL_PATH}/home"
 }
 
-function	jail::configure_bash()
-{
-	local	c_r=$(printf '%b' '\x1b[31m')
-	local	c_y=$(printf '%b' '\x1b[33m')
-	local	c_g=$(printf '%b' '\x1b[32m')
-	local	c_u=$(printf '%b' '\x1b[4m')
-	local	rst=$(printf '%b' '\x1b[0m')
-
-	prompt="${c_r}${USER}"
-	prompt+="🔒"
-	prompt+="${c_y}\\h${rst}"
-	prompt+=" [ ${c_g}${c_u}\\w${rst} ] $ "
-
-	echo "PS1=\"${prompt}\"" > "${JAIL_PATH}/etc/bash.bashrc"
-	cp -r /lib/terminfo "${JAIL_PATH}/etc/"
-}
-
 function	jail::prepare()
 {
+	: "
+	INFO
+		LIB				jail
+		FUNCTION		prepare
+		DESC			prepare phase of the jail
+	"
 	jail::mkdir
 	jail::copy_command
-	jail::copy_library
-	jail::configure_bash
+	jail::hardening
+	jail::configure_prompt
 }
 
 function	jail::clean()
 {
-	[ -d "${JAIL_PATH}" ] && rm -rf "${JAIL_PATH}"
-	trap - SIGINT SIGQUIT SIGTSTP
+	: "
+	INFO
+		LIB				jail
+		FUNCTION		clean
+		DESC			clean jail, called at the end and traped to BLOCKED_SIG
+		ARG				[?] BLOCKED_SIG=${BLOCKED_SIG[@]}
+						[?] JAIL_PATH=${JAIL_PATH}
+	"
+	"${CMD['[']}" -d "${JAIL_PATH}" ] && "${CMD['rm']}" -rf "${JAIL_PATH}"
+	trap - ${BLOCKED_SIG[@]}
 	exit 1
 }
 
+##END#__________________________<#_|FUNCTION|_#>______________________________##
+
+##BEGIN#__________________________>#_|MAIN|_#<________________________________##
+
 function	jail::entry()
 {
+	: "
+	INFO
+		LIB				jail
+		FUNCTION		entry
+		DESC			main entry to the jail, it prepare, launch and then
+						clean the jail
+		ARG				[?] JAIL_PATH=${JAIL_PATH}
+						[?] BASE_HOME=${BASE_HOME}
+	"
+
 	jail::prepare
 	(exec \
-		unshare \
+		"${CMD['unshare']}" \
 			--map-user=$(id -ru) \
 			--map-group=$(id -rg) \
 			--pid \
 			--kill-child=SIGQUIT \
-			bwrap \
+			"${CMD['bwrap']}" \
 				--bind "${JAIL_PATH}" / \
 				--dev-bind "${BASE_HOME}" "/home/${USER}" \
 				--unshare-all \
@@ -101,26 +230,6 @@ function	jail::entry()
 				"/bin/bash")
 	jail::clean
 }
-
-##END#__________________________<#_|FUNCTION|_#>______________________________##
-
-##BEGIN#__________________________>#_|MAIN|_#<________________________________##
-
-trap "jail::clean" SIGINT SIGQUIT SIGTSTP
-
-BASE_HOME=/home
-BASE_HOME="${BASE_HOME}/${USER}"
-JAIL_PATH="${BASE_HOME}/.jail"
-
-ALLOWED_CMD=(
-	"bash"
-	"cat"
-	"du"
-	"less"
-	"ls"
-	"rm"
-	"clear"
-)
 
 jail::entry
 
