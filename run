@@ -8,23 +8,45 @@ BLOCKED_SIG=(
 	"SIGINT"
 	"SIGQUIT"
 	"SIGTSTP"
+	"exit"
 )
 
 # trap BLOCKED_SIG to jail::clean
 trap "jail::clean" ${BLOCKED_SIG[@]}
+
+## STRICT MODE
+## Exit on non zero return code
+set -e
+## Unknown Var
+set -u
+## if a command in a pipe failed
+set -o pipefail
+## Setting IFS (Internal Field Separator), disable considering word separated by space
+IFS=$'\n\t'
 
 # building user home folder
 ## Base home folder
 BASE_HOME=/home
 ## user home folder
 BASE_HOME="${BASE_HOME}/${USER}"
+## jail base path
 JAILS_PATH="${BASE_HOME}/.jails"
+## max jail per user
+MAX_JAIL=5
 
-# for multiple jailS
-for jail_id in {00..10}; do
-	if [ ! -d "${JAILS_PATH}/jail_${jail_id}" ]; then
-		JAIL_PATH="${JAILS_PATH}/jail_${jail_id}"
+# multiple jail
+## generate id, zero padded, if MAX_JAIL=10, go through 00, 01, 02 and so on
+for jail_id in $(seq -w 0 ${MAX_JAIL}); do
+	## the first non dir path is selected and go out the loop
+	if [ ! -d "${JAILS_PATH}/jail_0x${jail_id}" ]; then
+		JAIL_PATH="${JAILS_PATH}/jail_0x${jail_id}"
 		break
+	fi
+	## if we reach the MAX_JAIL
+	if [ "${jail_id}" == "${MAX_JAIL}" ]; then
+		printf "error: no jail left\n"
+		trap - ${BLOCKED_SIG[@]}
+		exit
 	fi
 done
 
@@ -37,6 +59,7 @@ ALLOWED_CMD=(
 	'ls'
 	'rm'
 	'clear'
+	'vim'
 )
 
 # used command, using the path so no alias or nasty stuff will interfer
@@ -55,6 +78,7 @@ declare -A CMD=(
 	['[']=0
 )
 
+# export cmd path as value of the named array
 for key in ${!CMD[@]}; do
 	CMD[${key}]="$(type -P ${key})"
 done
@@ -67,9 +91,10 @@ function	utils::mkdir()
 	INFO
 		LIB				utils
 		FUNCTION		mkdir
-		DESC			make a dir. if path is a file is deleted, then check if
-						path is a dir, in this way i ensure that the dir_path is
-						created
+		DESC			make a dir. if dir_path is a file, then deleted it, after
+						this check if dir_path is a dir, if so delet it, finaly
+						check if dir_path is not a dir, if so created it.
+						in this way i ensure that the dir_path is created
 		ARG				[1] dir_path=${1:-}
 	"
 	local	dir_path="${1:-}"
@@ -89,22 +114,24 @@ function	jail::configure_prompt()
 		DESC			configure a cool prompt for the jailed prisoner :)
 		ARG				[?] JAIL_PATH=${JAIL_PATH}
 	"
-	local	c_r=$("${CMD['printf']}" '%b' '\x1b[31m')
-	local	c_y=$("${CMD['printf']}" '%b' '\x1b[33m')
-	local	c_g=$("${CMD['printf']}" '%b' '\x1b[32m')
-	local	c_u=$("${CMD['printf']}" '%b' '\x1b[4m')
-	local	rst=$("${CMD['printf']}" '%b' '\x1b[0m')
+	local	c_r=$("${CMD['printf']}" '%b' '\[\x1b[31m\]')
+	local	c_y=$("${CMD['printf']}" '%b' '\[\x1b[33m\]')
+	local	c_g=$("${CMD['printf']}" '%b' '\[\x1b[32m\]')
+	local	c_u=$("${CMD['printf']}" '%b' '\[\x1b[4m\]')
+	local	rst=$("${CMD['printf']}" '%b' '\[\x1b[0m\]')
 
 	prompt="${c_r}${USER}"
 	prompt+="🔒"
 	prompt+="${c_y}\\h${rst}"
 	prompt+=" [ ${c_g}${c_u}\\w${rst} ] $ "
 
+	# happened the cool prompt on the default bash.bashrc
 	"${CMD['printf']}" "PS1=\"${prompt}\"\n" > "${JAIL_PATH}/etc/bash.bashrc"
 }
 
 function	jail::hardening::unset_bash_function()
 {
+	# unset bash built-in
 	unset -f env
 }
 
@@ -129,15 +156,20 @@ function	jail::copy_command()
 	declare	-a	library
 
 	for command in "${ALLOWED_CMD[@]}"; do
+		# get real path not an nasty aliases or something else
 		command_path=$(type -P "${command}")
+		# cp command path to ${JAIL_PATH}/bin
 		"${CMD['[']}" "${command_path}" ] && "${CMD['cp']}" "${command_path}" "${JAIL_PATH}/bin"
 	done
 
 	library=($(\
 	for command_path in $("${CMD['find']}" "${JAIL_PATH}/bin" -type f -executable -print); do
+		# for each executable in ${JAIL_PATH}/bin, get the associated shared library path
 		"${CMD['ldd']}" "${command_path}" | "${CMD['perl']}" -ne "print if s|^.*?(/lib.*?) .*$|\1|g"
+	# uniq the output to get uniq shared library path
 	done | "${CMD['sort']}" -u))
 
+	# copy library
 	for element in ${library[@]}; do
 		base_dir="${JAIL_PATH}${element%\/*}"
 		"${CMD['mkdir']}" -p "${base_dir}"
@@ -189,9 +221,12 @@ function	jail::clean()
 		ARG				[?] BLOCKED_SIG=${BLOCKED_SIG[@]}
 						[?] JAIL_PATH=${JAIL_PATH}
 	"
+	# remove ${JAIL_PATH}
 	"${CMD['[']}" -d "${JAIL_PATH}" ] && "${CMD['rm']}" -rf "${JAIL_PATH}"
+	# untrap blocked signal
 	trap - ${BLOCKED_SIG[@]}
-	exit 1
+	# exit
+	exit
 }
 
 ##END#__________________________<#_|FUNCTION|_#>______________________________##
@@ -209,29 +244,58 @@ function	jail::entry()
 		ARG				[?] JAIL_PATH=${JAIL_PATH}
 						[?] BASE_HOME=${BASE_HOME}
 	"
-
 	jail::prepare
-	(exec \
-		"${CMD['unshare']}" \
-			--map-user=$(id -ru) \
-			--map-group=$(id -rg) \
-			--pid \
-			--kill-child=SIGQUIT \
-			"${CMD['bwrap']}" \
-				--bind "${JAIL_PATH}" / \
-				--dev-bind "${BASE_HOME}" "/home/${USER}" \
-				--unshare-all \
-				--chdir "${JAIL_PATH}/home" \
-				--clearenv \
-				--setenv PROMPT_DIRTRIM "2" \
-				--setenv LS_COLORS "${LS_COLORS}" \
-				--setenv TERM "${TERM}" \
-				--hostname jailed \
-				"/bin/bash")
+	"${CMD['unshare']}" \
+		--map-user=$(id -ru) \
+		--map-group=$(id -rg) \
+		--pid \
+		--kill-child=SIGQUIT \
+		"${CMD['bwrap']}" \
+			--bind "${JAIL_PATH}" / \
+			--dev-bind "${BASE_HOME}" "/home/${USER}" \
+			--unshare-all \
+			--chdir "/home/${USER}" \
+			--clearenv \
+			--setenv PROMPT_DIRTRIM "2" \
+			--setenv LS_COLORS "${LS_COLORS}" \
+			--setenv TERM "${TERM}" \
+			--hostname jailed \
+			"/bin/bash"
+	: "
+	unshare
+		--map-user=UID
+			> create a namespace for the User ID
+		--map-group=GID
+			> create a namespace for the Group ID
+		--pid
+			> create a namespace for the PID (launch the command as PID 1)
+		--kill-child=SIG
+			> kill the child with a specific SIG
+	bwrap
+		--bind SRC DST
+			> set the root of the chroot
+		--dev-bind SRC DST
+			> bind the home to /home/${USER}, so the home is accessible from the
+			chroot
+		--unshare-all
+			> unshare all remaining available namespaces
+		--chdir DST
+			> change starting dir to /home/${USER}
+		--clearenv
+			> unset all env variable
+		--setenv KEY "VALUE"
+			> set env variable name, KEY, to the given VALUE
+			PROMPT_DIRTRIM	-> set the number of dir to display on the prompt
+			LS_COLORS		-> fancy color on ls
+			TERM			-> set the current shell
+		--hostname HOSTNAME
+			> set the unshared
+		/bin/bash
+			> set the executable to be the PID 1
+	"
 	jail::clean
 }
 
 jail::entry
 
 ##END#____________________________<#_|MAIN|_#>________________________________##
-
