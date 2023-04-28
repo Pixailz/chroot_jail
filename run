@@ -221,7 +221,7 @@ function	jail::entry()
 				--bind "${JAIL_PATH}" / \
 				--dev-bind "${BASE_HOME}" "/home/${USER}" \
 				--unshare-all \
-				--chdir "${BASE_HOME}" \
+				--chdir "${JAIL_PATH}/home" \
 				--clearenv \
 				--setenv PROMPT_DIRTRIM "2" \
 				--setenv LS_COLORS "${LS_COLORS}" \
