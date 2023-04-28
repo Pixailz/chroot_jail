@@ -26,7 +26,7 @@ IFS=$'\n\t'
 
 # building user home folder
 ## Base home folder
-BASE_HOME=/home
+BASE_HOME=/nfs/homes/
 ## user home folder
 BASE_HOME="${BASE_HOME}/${USER}"
 ## jail base path
@@ -60,6 +60,7 @@ ALLOWED_CMD=(
 	'rm'
 	'clear'
 	'vim'
+	'git'
 )
 
 # used command, using the path so no alias or nasty stuff will interfer
@@ -246,16 +247,12 @@ function	jail::entry()
 	"
 	jail::prepare
 	"${CMD['unshare']}" \
-		--map-user=$(id -ru) \
-		--map-group=$(id -rg) \
-		--pid \
-		--kill-child=SIGQUIT \
 		"${CMD['bwrap']}" \
 			--bind "${JAIL_PATH}" / \
+			--dev-bind "/dev/null" "/dev/null" \
 			--dev-bind "${BASE_HOME}" "/home/${USER}" \
 			--unshare-all \
 			--chdir "/home/${USER}" \
-			--clearenv \
 			--setenv PROMPT_DIRTRIM "2" \
 			--setenv LS_COLORS "${LS_COLORS}" \
 			--setenv TERM "${TERM}" \
