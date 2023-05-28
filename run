@@ -1,4 +1,16 @@
 #!/bin/bash
+##BEGIN#__________________________>#_|INFO|_#<________________________________##
+##                                                           ______ _         ##
+## DETAILS:                                                  | ___ (_)        ##
+##- FILENAME	chroot_jail                                  | |_/ /___  __   ##
+##- SCRIPT_ID	0x0003                                       |  __/| \ \/ /   ##
+##- AUTHOR		Pixailz                                      | |   | |>  <    ##
+##- CREATED		2023−04−28T08:12:40+0100                     \_|   |_/_/\_\   ##
+##                                                                            ##
+## DESCRIPTION:                                                               ##
+### Create an unshared space for user and put it on a bwrap session           ##
+##                                                                            ##
+##END#____________________________<#_|INFO|_#>________________________________##
 
 # i think this is better that this happen here, as this is the first thing the
 # scripts will do
