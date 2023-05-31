@@ -70,7 +70,6 @@ ALLOWED_CMD=(
 	'less'
 	'ls'
 	'rm'
-	'clear'
 	'vim'
 	'git'
 )
@@ -188,9 +187,6 @@ function	jail::copy_command()
 		"${CMD['mkdir']}" -p "${base_dir}"
 		"${CMD['cp']}" "${element}" "${base_dir}"
 	done
-
-	# copy database of term to allow ctrl+l to clear the screen
-	"${CMD['cp']}" -r /lib/terminfo "${JAIL_PATH}/etc/"
 }
 
 function	jail::mkdir()
