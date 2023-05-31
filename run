@@ -259,6 +259,8 @@ function	jail::entry()
 			--bind "${JAIL_PATH}" / \
 			--dev-bind "/dev/null" "/dev/null" \
 			--dev-bind "${BASE_HOME}" "/home/${USER}" \
+			--dev-bind "/sgoinfre/goinfre/Perso/${USER}" "/sgoinfre" \
+			--dev-bind "/goinfre/${USER}" "/goinfre" \
 			--unshare-all \
 			--chdir "/home/${USER}" \
 			--setenv PROMPT_DIRTRIM "2" \
